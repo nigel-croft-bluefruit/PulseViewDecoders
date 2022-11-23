@@ -43,6 +43,9 @@ class Decoder(srd.Decoder):
         {'id': 'range', 'desc': 'Voltage Range:', 'default': RANGE_5V, 'values': (RANGE_2_5V, RANGE_5V, RANGE_10V)},
     )
 
+    range_display = ('10V', '2.5V', '5V', '10V')
+    range_reg_display = ('Range A: Ch3-0', 'Range A: Ch7-4', 'Range B: Ch3-0', 'Range B: Ch7-4')
+
     def __init__(self,):
         self.reset()
 
@@ -85,10 +88,22 @@ class Decoder(srd.Decoder):
                         self.put(self.ss, self.ss+(self.bit_width*8), self.out_ann, [1, ['Ch Sel (%02x)' % ctl_reg]])
                         self.put(self.ss+(self.bit_width*8), self.ss+(self.bit_width*12), self.out_ann, [1, ['ChB:%02x' % chb]])
                         self.put(self.ss+(self.bit_width*12), self.ss+(self.bit_width*16), self.out_ann, [1, ['ChA:%02x' % cha]])
+                    elif ctl_reg >= 4 and ctl_reg <= 7:
+                        self.put(self.ss, self.ss+(self.bit_width*8), self.out_ann, [1, [Decoder.range_reg_display[ctl_reg-4]]])
+                        for i in range(4):
+                            rng_ss = self.ss+(self.bit_width*8)
+                            rng = (self.mosi >> 6-(i*2)) &0x03
+
+                            self.put(rng_ss+(self.bit_width*2*i), 
+                                rng_ss+(self.bit_width*2*(i+1)), 
+                                self.out_ann, 
+                                [1, [Decoder.range_display[rng]]]
+                            )
 
                 self.miso = 0
                 self.mosi = 0
                 self.ss = None
+
         elif ptype == 'BITS':
             mosi = data[1]
             miso = data[2]
