@@ -29,36 +29,84 @@ class Decoder(srd.Decoder):
     outputs = []
     tags = ['IC', 'Analog/digital']
     annotations = (
-        ('voltage', 'Voltage'),
+        ('voltage', 'Voltage'), # 0
+        ('control', 'Control'), # 1
+    )
+    annotation_rows = (
+         ('mosi', 'MOSI', (1,)),
+         ('miso', 'MISO', (0,)),
+    )
+    RANGE_2_5V = '+/- 2.5V'
+    RANGE_5V = '+/- 5.0V'
+    RANGE_10V = '+/- 10V'
+    options =  (
+        {'id': 'range', 'desc': 'Voltage Range:', 'default': RANGE_5V, 'values': (RANGE_2_5V, RANGE_5V, RANGE_10V)},
     )
 
     def __init__(self,):
         self.reset()
 
     def reset(self):
-        self.data = 0
+        self.miso = 0
+        self.mosi = 0
         self.ss = None
+        self.has_mosi = False
+        self.has_miso = False
+
 
     def start(self):
         self.out_ann = self.register(srd.OUTPUT_ANN)
 
     def decode(self, ss, es, data):
         ptype = data[0]
+        if self.options['range'] == Decoder.RANGE_2_5V:
+            self.range = 2.5
+        elif self.options['range'] == Decoder.RANGE_5V:
+            self.range = 5.
+        else:
+            self.range = 10.
+
 
         if ptype == 'CS-CHANGE':
             cs_old, cs_new = data[1:]
             if cs_old is not None and cs_old == 0 and cs_new == 1:
-                self.data >>= 1
-                volts = self.data * 5 # Assume +-5V range
-                volts /= 32767
-                self.put(self.ss, self.es, self.out_ann, [0, ['%.3fV' % volts]])
-                self.data = 0
+                if self.has_miso:
+                    self.miso >>= 1
+                    volts = self.miso * self.range
+                    volts /= 32767
+                    self.put(self.ss, self.es, self.out_ann, [0, ['%.3fV' % volts]])
+
+                if self.has_mosi:
+                    self.mosi >>=1
+                    ctl_reg = (self.mosi >> 9) & 0x3F
+                    if ctl_reg == 3:
+                        cha = self.mosi & 0x0F
+                        chb = (self.mosi >> 4) & 0x0F
+                        self.put(self.ss, self.ss+(self.bit_width*8), self.out_ann, [1, ['Ch Sel (%02x)' % ctl_reg]])
+                        self.put(self.ss+(self.bit_width*8), self.ss+(self.bit_width*12), self.out_ann, [1, ['ChB:%02x' % chb]])
+                        self.put(self.ss+(self.bit_width*12), self.ss+(self.bit_width*16), self.out_ann, [1, ['ChA:%02x' % cha]])
+
+                self.miso = 0
+                self.mosi = 0
                 self.ss = None
         elif ptype == 'BITS':
+            mosi = data[1]
             miso = data[2]
+            self.has_mosi = mosi != None
+            self.has_miso = miso != None
+
             self.es = es
             if self.ss == None:
                 self.ss = ss
-            for bit in reversed(miso):
-                self.data = self.data | bit[0]
-                self.data <<= 1
+
+            if self.has_miso:
+                self.bit_width = (es - ss) // len(miso)
+                for bit in reversed(miso):
+                    self.miso = self.miso | bit[0]
+                    self.miso <<= 1
+
+            if self.has_mosi:
+                self.bit_width = (es - ss) // len(mosi)
+                for bit in reversed(mosi):
+                    self.mosi = self.mosi | bit[0]
+                    self.mosi <<= 1
